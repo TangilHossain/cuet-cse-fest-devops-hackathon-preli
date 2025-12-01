@@ -1,6 +1,135 @@
-# services:
-  # backend:
+services:
+  # MongoDB Database Service (Production)
+  mongo:
+    image: mongo:7
+    container_name: prod-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGO_DB_NAME}
+    volumes:
+      - mongo_data_prod:/data/db
+      - mongo_config_prod:/data/configdb
+    networks:
+      - internal_net
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
 
-  # gateway:
+  # Backend API Service (Production)
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+      args:
+        NODE_ENV: production
+    container_name: prod-backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      BACKEND_PORT: ${BACKEND_PORT}
+      MONGO_URI: mongodb://${MONGO_INITDB_ROOT_USERNAME}:${MONGO_INITDB_ROOT_PASSWORD}@mongo:27017/${MONGO_DB_NAME}?authSource=admin
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks:
+      - internal_net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:${BACKEND_PORT}/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    security_opt:
+      - no-new-privileges:true
+    read_only: false
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
 
-  # mongo:
+  # Gateway Service (Production - Public-facing)
+  gateway:
+    build:
+      context: ../gateway
+      dockerfile: Dockerfile
+      args:
+        NODE_ENV: production
+    container_name: prod-gateway
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      GATEWAY_PORT: ${GATEWAY_PORT}
+      BACKEND_PORT: ${BACKEND_PORT}
+    ports:
+      - "${GATEWAY_PORT}:5921"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - public_net
+      - internal_net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5921/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+    security_opt:
+      - no-new-privileges:true
+    read_only: false
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+
+networks:
+  # Public network - only gateway is exposed
+  public_net:
+    driver: bridge
+    name: prod_public_net
+  
+  # Internal network - backend and mongo communication only
+  internal_net:
+    driver: bridge
+    name: prod_internal_net
+    internal: true  # Strict isolation - no external internet access
+
+volumes:
+  mongo_data_prod:
+    name: prod_mongo_data
+  mongo_config_prod:
+    name: prod_mongo_config

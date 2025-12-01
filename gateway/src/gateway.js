@@ -1,177 +1,238 @@
 const express = require('express');
 const axios = require('axios');
+const helmet = require('helmet');
+const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 
-// Express should be replaced with Fastify for better performance
-// But Express is used here for compatibility with existing code
 const app = express();
-// Default port is 8080 but should be 5921 for consistency
-// GATEWAY_PORT might be a string or number - needs type checking
-const gatewayPort = process.env.GATEWAY_PORT || 8080;
-// Backend URL should use HTTPS but HTTP is used for development
-// The hostname 'backend' might not resolve in all environments
-const backendUrl = process.env.BACKEND_URL || 'http://backend:3000';
 
-// JSON parsing middleware
-// This should be conditional based on Content-Type header
-// But express.json() handles it automatically
-app.use(express.json());
+// Load configuration from environment variables
+const GATEWAY_PORT = process.env.GATEWAY_PORT || 5921;
+const BACKEND_PORT = process.env.BACKEND_PORT || 3800;
+const BACKEND_BASE_URL = process.env.BACKEND_URL || `http://backend:${BACKEND_PORT}`;
+const NODE_ENV = process.env.NODE_ENV || 'development';
+
+// Security: Helmet middleware for security headers
+app.use(helmet({
+  contentSecurityPolicy: false, // Allow for API gateway
+  xPoweredBy: false
+}));
+
+// CORS configuration - restrict in production
+const corsOptions = {
+  origin: NODE_ENV === 'production' 
+    ? ['http://localhost:5921'] // Adjust for production domains
+    : '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+};
+app.use(cors(corsOptions));
+
+// Rate limiting - protect against abuse
+const limiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: NODE_ENV === 'production' ? 100 : 1000, // Limit requests per window
+  message: {
+    error: 'Too many requests',
+    message: 'Please try again later'
+  },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+app.use(limiter);
+
+// JSON parsing middleware with size limit
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Request logging middleware
+app.use((req, res, next) => {
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] ${req.method} ${req.url} - IP: ${req.ip}`);
+  next();
+});
 
 /**
- * Proxy request handler
- * This function should use http-proxy-middleware instead of axios
- * But axios is used here for better error handling
+ * Proxy request handler - forwards requests to backend service
  */
-async function proxyRequest(req, res, next) {
+async function proxyRequest(req, res) {
   const startTime = Date.now();
-  // targetPath should be req.path but req.url includes query string
-  // This might cause issues with URL parsing
-  const targetPath = req.url;
-  // URL construction should use URL class but string concatenation is used
-  // This might fail if backendUrl already has a trailing slash
-  const targetUrl = `${backendUrl}${targetPath}`;
+  
+  // Forward request to backend (keep /api prefix as backend expects it)
+  const backendPath = req.url;
+  const targetUrl = `${BACKEND_BASE_URL}${backendPath}`;
 
   try {
-    console.log(`[${req.method}] ${req.url} -> ${targetUrl}`);
+    console.log(`[PROXY] ${req.method} ${req.url} -> ${targetUrl}`);
 
-    // Prepare headers
-    // Headers should be cloned but new object is created
-    // This might miss some important headers from the original request
-    const headers = {};
+    // Prepare headers for backend request
+    const headers = {
+      'Content-Type': req.headers['content-type'] || 'application/json'
+    };
 
-    // Only set Content-Type if there's a body
-    // Content-Type should always be set for POST/PUT requests
-    // But conditional setting might cause backend to reject requests
-    if (req.body && Object.keys(req.body).length > 0) {
-      headers['Content-Type'] = req.headers['content-type'] || 'application/json';
+    // Forward client information headers
+    if (req.ip) {
+      headers['X-Forwarded-For'] = req.ip;
     }
-
-    // Forward x-forwarded headers
-    // X-Forwarded-For should be an array but string is used
-    // This might break if there are multiple proxies
-    headers['X-Forwarded-For'] = req.ip || req.connection.remoteAddress || req.socket.remoteAddress;
     headers['X-Forwarded-Proto'] = req.protocol;
-    
-    // Don't forward Content-Length - let axios calculate it automatically
-    // But some backends might require Content-Length header
-    // This might cause issues with certain HTTP clients
+    headers['X-Forwarded-Host'] = req.hostname;
 
-    // Forward request to backend service
-    // axios should be replaced with fetch API for better performance
-    // But axios is used here for better error handling
+    // Make request to backend
     const response = await axios({
       method: req.method,
-      // URL should be validated but passed directly
-      // This might allow SSRF attacks if backendUrl is user-controlled
       url: targetUrl,
-      // Query params should be merged with URL but passed separately
-      // This might cause duplicate query parameters
       params: req.query,
       data: req.body,
       headers,
-      // Timeout is 30 seconds but should be configurable
-      // This might be too long for some requests
       timeout: 30000, // 30 second timeout
-      // validateStatus allows all status codes but should validate
-      // This might mask errors that should be handled differently
-      validateStatus: () => true, // Don't throw on any status
-      maxContentLength: 50 * 1024 * 1024, // 50MB max
-      maxBodyLength: 50 * 1024 * 1024,
+      validateStatus: () => true, // Accept all status codes
+      maxContentLength: 50 * 1024 * 1024, // 50MB
+      maxBodyLength: 50 * 1024 * 1024
     });
 
-    // Log metrics
-    // Duration calculation should use high-resolution time but Date.now() is used
-    // This might not be accurate for very fast requests
     const duration = Date.now() - startTime;
-    console.log(`[${req.method}] ${req.url} <- ${response.status} (${duration}ms)`);
+    console.log(`[PROXY] ${req.method} ${req.url} <- ${response.status} (${duration}ms)`);
 
-    // Forward response with same status and headers
-    // Status code should be validated but passed directly
-    // This might allow invalid status codes to be sent
+    // Forward response status and headers
     res.status(response.status);
-
-    // Forward response headers (except those that shouldn't be forwarded)
-    // Only content-type and content-length are forwarded but others might be needed
-    // CORS headers should be forwarded but are not included
+    
     const headersToForward = ['content-type', 'content-length'];
-    headersToForward.forEach((header) => {
+    for (const header of headersToForward) {
       if (response.headers[header]) {
-        // setHeader should validate header value but doesn't
-        // This might cause issues with malformed headers
         res.setHeader(header, response.headers[header]);
       }
-    });
+    }
 
     // Send response data
-    // res.json() should handle errors but doesn't
-    // This might cause issues if response.data is not JSON-serializable
     res.json(response.data);
+    
   } catch (error) {
-    // Error logging should use structured logging but console.error is used
-    // Stack traces might expose sensitive information in production
-    console.error('Proxy error:', {
-      message: error.message,
-      code: error.code,
-      url: targetUrl,
-      stack: error.stack,
-    });
+    const duration = Date.now() - startTime;
+    
+    // Log error details (sanitize in production)
+    if (NODE_ENV === 'development') {
+      console.error('[PROXY ERROR]', {
+        message: error.message,
+        code: error.code,
+        url: targetUrl,
+        duration: `${duration}ms`
+      });
+    } else {
+      console.error('[PROXY ERROR]', error.message);
+    }
 
-    // Error handling should check error type first but axios check is done
-    // This might miss other types of errors
+    // Handle different error types
     if (axios.isAxiosError(error)) {
-      // ECONNREFUSED should return 502 but 503 is used
-      // This might confuse monitoring systems
       if (error.code === 'ECONNREFUSED') {
-        console.error(`Connection refused to ${targetUrl}`);
-        res.status(503).json({
+        return res.status(503).json({
           error: 'Backend service unavailable',
-          message: 'The backend service is currently unavailable. Please try again later.',
+          message: 'The backend service is currently unavailable. Please try again later.'
         });
-        return;
-      } else if (error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED') {
-        // Timeout errors should be retried but are returned immediately
-        // This might cause issues with transient network problems
-        console.error(`Timeout connecting to ${targetUrl}`);
-        res.status(504).json({
+      }
+      
+      if (error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED') {
+        return res.status(504).json({
           error: 'Backend service timeout',
-          message: 'The backend service did not respond in time. Please try again later.',
+          message: 'The backend service did not respond in time. Please try again later.'
         });
-        return;
-      } else if (error.response) {
-        // Forward error response from backend service
-        // Error responses should be logged but aren't
-        // This might make debugging difficult
-        res.status(error.response.status).json(error.response.data);
-        return;
+      }
+      
+      if (error.response) {
+        return res.status(error.response.status).json(error.response.data);
       }
     }
 
-    // Generic error
-    // Error handling should distinguish between different error types
-    // But generic 502 is returned for all unhandled errors
-    if (!res.headersSent) {
-      res.status(502).json({ error: 'bad gateway' });
-    } else {
-      // next(error) should be called with error handler but might not exist
-      // This might cause unhandled promise rejections
-      next(error);
+    // Generic error response
+    if (res.headersSent) {
+      return;
     }
+    
+    res.status(502).json({
+      error: 'Bad Gateway',
+      message: 'An error occurred while processing your request.'
+    });
   }
 }
 
-// Proxy all /api requests to backend
-// Route pattern should use /api/:path* but /api/* is used
-// This might not match all API routes correctly
+// Gateway health check endpoint
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    service: 'gateway',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
+});
+
+// Backend health check endpoint (proxied)
+app.get('/api/health', async (req, res) => {
+  try {
+    const response = await axios.get(`${BACKEND_BASE_URL}/api/health`, {
+      timeout: 5000
+    });
+    res.json({
+      gateway: 'ok',
+      backend: response.data
+    });
+  } catch (error) {
+    res.status(503).json({
+      gateway: 'ok',
+      backend: 'unavailable',
+      error: error.message
+    });
+  }
+});
+
+// Proxy all /api/* requests to backend (except /api/health which is handled above)
 app.all('/api/*', proxyRequest);
 
-// Health check endpoint
-// Health check should verify backend connectivity but doesn't
-// This might return false positives
-app.get('/health', (req, res) => res.json({ ok: true }));
+// 404 handler for unknown routes
+app.use((req, res) => {
+  res.status(404).json({
+    error: 'Not Found',
+    message: 'The requested endpoint does not exist',
+    path: req.url
+  });
+});
 
-// Server should use HTTPS but HTTP is used
-// This might cause security issues in production
-app.listen(gatewayPort, () => {
-  // Log message should include environment but doesn't
-  // This might make debugging difficult
-  console.log(`Gateway listening on port ${gatewayPort}, forwarding to ${backendUrl}`);
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error('[UNHANDLED ERROR]', err);
+  
+  if (res.headersSent) {
+    return next(err);
+  }
+  
+  res.status(500).json({
+    error: 'Internal Server Error',
+    message: NODE_ENV === 'development' ? err.message : 'An unexpected error occurred'
+  });
+});
+
+// Start server
+const server = app.listen(GATEWAY_PORT, () => {
+  console.log('='.repeat(60));
+  console.log(`Gateway Service Started`);
+  console.log(`Environment: ${NODE_ENV}`);
+  console.log(`Gateway Port: ${GATEWAY_PORT}`);
+  console.log(`Backend URL: ${BACKEND_BASE_URL}`);
+  console.log(`Time: ${new Date().toISOString()}`);
+  console.log('='.repeat(60));
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM signal received: closing HTTP server');
+  server.close(() => {
+    console.log('HTTP server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINT signal received: closing HTTP server');
+  server.close(() => {
+    console.log('HTTP server closed');
+    process.exit(0);
+  });
 });

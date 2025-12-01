@@ -1,6 +1,104 @@
-# services:
-  # backend:
+services:
+  # MongoDB Database Service
+  mongo:
+    image: mongo:7
+    container_name: dev-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: secure_password_here
+      MONGO_INITDB_DATABASE: products_db
+    # ports:
+    #   - "27017:27017"  # Commented out - MongoDB should NOT be exposed
+    volumes:
+      - mongo_data_dev:/data/db
+      - mongo_config_dev:/data/configdb
+    networks:
+      - internal_net
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
-  # gateway:
+  # Backend API Service
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile.dev
+    container_name: dev-backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      BACKEND_PORT: 3800
+      MONGO_URI: mongodb://admin:secure_password_here@mongo:27017/products_db?authSource=admin
+    volumes:
+      - ../backend/src:/app/src
+      - ../backend/package.json:/app/package.json
+      - ../backend/tsconfig.json:/app/tsconfig.json
+      - backend_node_modules:/app/node_modules
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks:
+      - internal_net
+    healthcheck:
+      test: ["CMD", "sh", "-c", "wget --no-verbose --tries=1 --spider http://localhost:3800/api/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
 
-  # mongo:
+  # Gateway Service (Public-facing)
+  gateway:
+    build:
+      context: ../gateway
+      dockerfile: Dockerfile.dev
+    container_name: dev-gateway
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      GATEWAY_PORT: 5921
+      BACKEND_PORT: 3800
+      BACKEND_URL: http://backend:3800
+    ports:
+      - "5921:5921"
+    volumes:
+      - ../gateway/src:/app/src
+      - ../gateway/package.json:/app/package.json
+      - gateway_node_modules:/app/node_modules
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - public_net
+      - internal_net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5921/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+
+networks:
+  # Public network - gateway exposed to host
+  public_net:
+    driver: bridge
+    name: dev_public_net
+  
+  # Internal network - backend and mongo isolated
+  internal_net:
+    driver: bridge
+    name: dev_internal_net
+    internal: false  # Set to true for strict isolation in production
+
+volumes:
+  mongo_data_dev:
+    name: dev_mongo_data
+  mongo_config_dev:
+    name: dev_mongo_config
+  backend_node_modules:
+    name: dev_backend_node_modules
+  gateway_node_modules:
+    name: dev_gateway_node_modules

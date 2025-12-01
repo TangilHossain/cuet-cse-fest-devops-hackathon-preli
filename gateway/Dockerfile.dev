@@ -1,0 +1,22 @@
+# Development Dockerfile for Gateway Service
+# Uses Node 18 with hot reload via nodemon
+
+FROM node:18
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies (including dev dependencies)
+RUN npm install
+
+# Copy source code (will be overridden by bind mount in docker-compose)
+COPY src/ ./src/
+
+# Expose gateway port
+EXPOSE 5921
+
+# Run with nodemon for hot reload
+CMD ["npm", "run", "dev"]
