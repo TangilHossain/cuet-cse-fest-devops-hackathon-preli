@@ -1,5 +1,32 @@
 # Hackathon Challenge
 
+## Quick Start Guide
+
+Get the application running in seconds using our Makefile commands:
+
+```bash
+# Development Environment (with hot-reload)
+make dev-up          # Start all services
+make health          # Check service health
+make test-all        # Run all tests
+make dev-down        # Stop services
+
+# Production Environment (optimized)
+make prod-up         # Start production services
+make prod-logs       # View logs
+make prod-down       # Stop production services
+
+# Useful Commands
+make help            # Show all available commands
+make clean           # Clean up containers and networks
+make db-backup       # Backup MongoDB database
+make mongo-shell     # Open MongoDB shell
+```
+
+All services will be accessible via the Gateway at `http://localhost:5921`. The backend and database are not directly exposed for security.
+
+---
+
 Your challenge is to take this simple e-commerce backend and turn it into a fully containerized microservices setup using Docker and solid DevOps practices.
 
 ## Problem Statement
@@ -45,6 +72,7 @@ The system must be containerized, secure, optimized, and maintain data persisten
 ```
 
 **Key Points:**
+
 - Gateway is the only service exposed to external clients (port 5921)
 - All external requests must go through the Gateway
 - Backend and MongoDB should not be exposed to public network
@@ -80,7 +108,7 @@ MONGO_INITDB_ROOT_PASSWORD=
 MONGO_URI=
 MONGO_DATABASE=
 BACKEND_PORT=3847 # DO NOT CHANGE
-GATEWAY_PORT=5921 # DO NOT CHANGE 
+GATEWAY_PORT=5921 # DO NOT CHANGE
 NODE_ENV=
 ```
 
@@ -88,7 +116,7 @@ NODE_ENV=
 
 - Separate Dev and Prod configs
 - Data Persistence
-- Follow security basics (limit network exposure, sanitize input) 
+- Follow security basics (limit network exposure, sanitize input)
 - Docker Image Optimization
 - Makefile CLI Commands for smooth dev and prod deploy experience (TRY TO COMPLETE THE COMMANDS COMMENTED IN THE Makefile)
 
@@ -101,11 +129,13 @@ Use the following curl commands to test your implementation.
 ### Health Checks
 
 Check gateway health:
+
 ```bash
 curl http://localhost:5921/health
 ```
 
 Check backend health via gateway:
+
 ```bash
 curl http://localhost:5921/api/health
 ```
@@ -113,6 +143,7 @@ curl http://localhost:5921/api/health
 ### Product Management
 
 Create a product:
+
 ```bash
 curl -X POST http://localhost:5921/api/products \
   -H 'Content-Type: application/json' \
@@ -120,6 +151,7 @@ curl -X POST http://localhost:5921/api/products \
 ```
 
 Get all products:
+
 ```bash
 curl http://localhost:5921/api/products
 ```
@@ -127,6 +159,7 @@ curl http://localhost:5921/api/products
 ### Security Test
 
 Verify backend is not directly accessible (should fail or be blocked):
+
 ```bash
 curl http://localhost:3847/api/products
 ```
@@ -134,14 +167,17 @@ curl http://localhost:3847/api/products
 ## Submission Process
 
 1. **Fork the Repository**
+
    - Fork this repository to your GitHub account
    - The repository must remain **private** during the contest
 
 2. **Make Repository Public**
+
    - In the **last 5 minutes** of the contest, make your repository **public**
    - Repositories that remain private after the contest ends will not be evaluated
 
 3. **Submit Repository URL**
+
    - Submit your repository URL at [arena.bongodev.com](https://arena.bongodev.com)
    - Ensure the URL is correct and accessible
 
@@ -160,4 +196,3 @@ curl http://localhost:3847/api/products
 - ✅ **Submission Deadline**: Ensure your repository is public and submitted before the contest ends.
 
 Good luck!
-
