@@ -27,6 +27,11 @@ services:
         reservations:
           cpus: '0.5'
           memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # Backend API Service (Production)
   backend:
@@ -68,6 +73,11 @@ services:
       - ALL
     cap_add:
       - NET_BIND_SERVICE
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # Gateway Service (Production - Public-facing)
   gateway:
@@ -117,6 +127,11 @@ services:
       - ALL
     cap_add:
       - NET_BIND_SERVICE
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 networks:
   # Public network - only gateway is exposed
