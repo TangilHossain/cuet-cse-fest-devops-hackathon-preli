@@ -40,7 +40,8 @@ services:
     environment:
       NODE_ENV: production
       BACKEND_PORT: ${BACKEND_PORT}
-      MONGO_URI: mongodb://${MONGO_INITDB_ROOT_USERNAME}:${MONGO_INITDB_ROOT_PASSWORD}@mongo:27017/${MONGO_DB_NAME}?authSource=admin
+      MONGO_URI: ${MONGO_URI}
+      MONGO_DATABASE: ${MONGO_DATABASE}
     depends_on:
       mongo:
         condition: service_healthy
@@ -81,6 +82,7 @@ services:
       NODE_ENV: production
       GATEWAY_PORT: ${GATEWAY_PORT}
       BACKEND_PORT: ${BACKEND_PORT}
+      BACKEND_URL: http://backend:${BACKEND_PORT}
     ports:
       - "${GATEWAY_PORT}:5921"
     depends_on:
