@@ -1,6 +1,57 @@
-# services:
-  # backend:
+services:
+  mongo:
+    image: mongo:7.0
+    container_name: hackathon-mongo-dev
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+    volumes:
+      - mongo-data-dev:/data/db
+    networks:
+      - hackathon-network
 
-  # gateway:
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile.dev
+    container_name: hackathon-backend-dev
+    restart: unless-stopped
+    environment:
+      MONGO_URI: ${MONGO_URI}
+      MONGO_DATABASE: ${MONGO_DATABASE}
+      BACKEND_PORT: ${BACKEND_PORT}
+      NODE_ENV: ${NODE_ENV}
+    volumes:
+      - ../backend/src:/app/src
+      - ../backend/tsconfig.json:/app/tsconfig.json
+    depends_on:
+      - mongo
+    networks:
+      - hackathon-network
 
-  # mongo:
+  gateway:
+    build:
+      context: ../gateway
+      dockerfile: Dockerfile.dev
+    container_name: hackathon-gateway-dev
+    restart: unless-stopped
+    environment:
+      GATEWAY_PORT: ${GATEWAY_PORT}
+      BACKEND_URL: http://backend:${BACKEND_PORT}
+    ports:
+      - "${GATEWAY_PORT}:${GATEWAY_PORT}"
+    volumes:
+      - ../gateway/src:/app/src
+    depends_on:
+      - backend
+    networks:
+      - hackathon-network
+
+volumes:
+  mongo-data-dev:
+    driver: local
+
+networks:
+  hackathon-network:
+    driver: bridge

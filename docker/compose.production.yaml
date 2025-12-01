@@ -1,6 +1,75 @@
-# services:
-  # backend:
+version: '3.8'
 
-  # gateway:
+services:
+  mongo:
+    image: mongo:7.0
+    container_name: hackathon-mongo-prod
+    restart: always
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+    volumes:
+      - mongo-data-prod:/data/db
+    networks:
+      - hackathon-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
-  # mongo:
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: hackathon-backend-prod
+    restart: always
+    environment:
+      MONGO_URI: ${MONGO_URI}
+      MONGO_DATABASE: ${MONGO_DATABASE}
+      BACKEND_PORT: ${BACKEND_PORT}
+      NODE_ENV: production
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks:
+      - hackathon-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:${BACKEND_PORT}/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  gateway:
+    build:
+      context: ../gateway
+      dockerfile: Dockerfile
+    container_name: hackathon-gateway-prod
+    restart: always
+    environment:
+      GATEWAY_PORT: ${GATEWAY_PORT}
+      BACKEND_URL: http://backend:${BACKEND_PORT}
+      NODE_ENV: production
+    ports:
+      - "${GATEWAY_PORT}:${GATEWAY_PORT}"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - hackathon-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:${GATEWAY_PORT}/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  mongo-data-prod:
+    driver: local
+
+networks:
+  hackathon-network:
+    driver: bridge
